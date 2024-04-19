@@ -49,6 +49,7 @@ def captureDetections(packet : DetectionPacket):
         ts = dai.Clock.now().__sub__(packet.img_detections.getTimestamp()).total_seconds()
         captureTimestampPub.setDefault(0.0)
         captureTimestampPub.set(ts)
+        print(ts)
         spatialX = []
         spatialY = []
         spatialZ = []
@@ -73,9 +74,12 @@ def captureDetections(packet : DetectionPacket):
         zArrPub.set(spatialZ)
         return
 
-with OakCamera(args=args) as oak:
-    color = oak.create_camera('color')
-    nn = oak.create_nn(args['config'], color, nn_type='yolo', spatial=True)
+with OakCamera(args=args, usb_speed=dai.UsbSpeed.SUPER_PLUS) as oak:
+    color = oak.create_camera('color', encode=False)
+    lMono = oak.create_camera(dai.CameraBoardSocket.CAM_B, resolution=dai.MonoCameraProperties.SensorResolution.THE_480_P, encode=False)
+    rMono = oak.create_camera(dai.CameraBoardSocket.CAM_C, resolution=dai.MonoCameraProperties.SensorResolution.THE_480_P, encode=False)
+    oak.pipeline.setXLinkChunkSize(0)
+    nn = oak.create_nn(args['config'], color, nn_type='yolo', spatial=True, tracker=False)
     nn.node.setNumInferenceThreads(1)
     nn.node.setNumNCEPerInferenceThread(2)
     nn.node.input.setBlocking(False)
