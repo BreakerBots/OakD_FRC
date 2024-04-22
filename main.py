@@ -2,8 +2,10 @@ from depthai_sdk import OakCamera, ArgsParser
 from depthai import NNData
 from depthai_sdk.classes import DetectionPacket
 from depthai_sdk.classes import Detections
+from depthai_sdk.classes.packets import TrackerPacket
 import depthai as dai
 import argparse
+import cv2
 import ntcore
 # parse arguments
 parser = argparse.ArgumentParser()
@@ -15,7 +17,9 @@ ntInst = ntcore.NetworkTableInstance.getDefault()
 ntInst.startClient4("example client")
 
 # connect to a roboRIO with team number TEAM
-ntInst.setServerTeam(5104)
+ntInst.setServerTeam(5104)	
+
+import cv2
 
 # starting a DS client will try to get the roboRIO address from the DS application
 ntInst.startDSClient()
@@ -29,6 +33,7 @@ ntTopicCaptureTimestamp = ntTable.getDoubleTopic("captureLatency")
 ntTopicArraySpatialX = ntTable.getDoubleArrayTopic("spatialX")
 ntTopicArraySpatialY = ntTable.getDoubleArrayTopic("spatialY")
 ntTopicArraySpatialZ = ntTable.getDoubleArrayTopic("spatialZ")
+ntTopicArrayObjectId = ntTable.getIntegerArrayTopic("objectID")
 ntTopicArrayConf = ntTable.getDoubleArrayTopic("confidence")
 ntTopicArrayTargetClass = ntTable.getStringArrayTopic("class")
 
@@ -37,49 +42,61 @@ captureTimestampPub = ntTopicCaptureTimestamp.publish()
 xArrPub = ntTopicArraySpatialX.publish()
 yArrPub = ntTopicArraySpatialY.publish()
 zArrPub = ntTopicArraySpatialZ.publish()
+objIdPub = ntTopicArrayObjectId.publish()
 confArrPub = ntTopicArrayConf.publish()
 classArrPub = ntTopicArrayTargetClass.publish()
 
-def captureDetections(packet : DetectionPacket):
-    detections = packet.detections
-    numTgts = len(detections)
+def captureTracklets(packet : TrackerPacket):
+
+    numTargets = 0
+    spatialX = []
+    spatialY = []
+    spatialZ = []
+    objectID = []
+    objectClass = []
+    conf = []
+    for track in packet.daiTracklets.tracklets:
+        if (track.status == dai.Tracklet.TrackingStatus.TRACKED or track.status == dai.Tracklet.TrackingStatus.NEW):
+            numTargets+=1
+            track.spatialCoordinates
+            spatialX.append(track.spatialCoordinates.x)
+            spatialY.append(track.spatialCoordinates.y)
+            spatialZ.append(track.spatialCoordinates.z)
+            objectID.append(track.id)
+            objectClass.append(nn.get_labels()[track.label])
+            conf.append(track.srcImgDetection.confidence)
     numTargetsPub.setDefault(0)
-    numTargetsPub.set(numTgts)
-    if (numTgts > 0):
-        ts = dai.Clock.now().__sub__(packet.img_detections.getTimestamp()).total_seconds()
+    numTargetsPub.set(numTargets)
+    if (numTargets > 0): 
+        ts = dai.Clock.now().__sub__(packet.msg.getTimestamp()).total_seconds()
         captureTimestampPub.setDefault(0.0)
         captureTimestampPub.set(ts)
         print(ts)
-        spatialX = []
-        spatialY = []
-        spatialZ = []
-        conf = []
-        classStr = []
-        for i in range(numTgts):
-            det = detections[i]
-            conf.append(det.confidence)
-            classStr.append(det.label_str)
-            spatialX.append(det.img_detection.spatialCoordinates.x / 1000.0)
-            spatialY.append(det.img_detection.spatialCoordinates.y / 1000.0)
-            spatialZ.append(det.img_detection.spatialCoordinates.z / 1000.0)
         confArrPub.setDefault([])
         confArrPub.set(conf)
         classArrPub.setDefault([])
-        classArrPub.set(classStr)
+        classArrPub.set(objectClass)
+        objIdPub.setDefault([])
+        objIdPub.set(objectID)
         xArrPub.setDefault([])
         xArrPub.set(spatialX)
         yArrPub.setDefault([])
         yArrPub.set(spatialY)
         zArrPub.setDefault([])
         zArrPub.set(spatialZ)
-        return
+    frame = packet.visualizer.draw(packet.decode())
+    cv2.imshow("tracker", frame)
+    return
+
+
 
 with OakCamera(args=args, usb_speed=dai.UsbSpeed.SUPER_PLUS) as oak:
     color = oak.create_camera('color', encode=False)
-    lMono = oak.create_camera(dai.CameraBoardSocket.CAM_B, resolution=dai.MonoCameraProperties.SensorResolution.THE_480_P, encode=False)
-    rMono = oak.create_camera(dai.CameraBoardSocket.CAM_C, resolution=dai.MonoCameraProperties.SensorResolution.THE_480_P, encode=False)
+    stereo = oak.create_stereo('480p')
     oak.pipeline.setXLinkChunkSize(0)
-    nn = oak.create_nn(args['config'], color, nn_type='yolo', spatial=True, tracker=False)
+    stereo.config_stereo(subpixel=False, lr_check=True)
+    nn = oak.create_nn(args['config'], color, nn_type='yolo', spatial=stereo, tracker=True)
+    nn.config_tracker(tracker_type=dai.TrackerType.ZERO_TERM_COLOR_HISTOGRAM, assignment_policy=dai.TrackerIdAssignmentPolicy.UNIQUE_ID, forget_after_n_frames=1, apply_tracking_filter=True, calculate_speed=False, threshold=0.4)
     nn.node.setNumInferenceThreads(1)
     nn.node.setNumNCEPerInferenceThread(2)
     nn.node.input.setBlocking(False)
@@ -92,7 +109,7 @@ with OakCamera(args=args, usb_speed=dai.UsbSpeed.SUPER_PLUS) as oak:
     #     calc_algo=dai.SpatialLocationCalculatorAlgorithm.AVERAGE
     # )
 
-    oak.visualize(nn, fps=True, scale=2/3)
-    oak.visualize(nn.out.passthrough, fps=True)
-    oak.callback(nn, callback=captureDetections)
+    visualizer = oak.visualize(nn, fps=True)
+    visualizer = oak.visualize(nn.out.tracker, callback=captureTracklets)
+    # oak.callback(nn.out.tracker, callback=captureTracklets)
     oak.start(blocking=True)
