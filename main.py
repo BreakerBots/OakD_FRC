@@ -111,4 +111,5 @@ with OakCamera(args=args, usb_speed=dai.UsbSpeed.SUPER_PLUS) as oak:
 
     visualizer = oak.visualize(nn, fps=True)
     visualizer = oak.visualize(nn.out.tracker, callback=captureTracklets)
+    # oak.callback(nn.out.tracker, callback=captureTracklets)
     oak.start(blocking=True)

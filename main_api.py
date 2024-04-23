@@ -17,9 +17,9 @@ import blobconverter
 # parse arguments
 parser = argparse.ArgumentParser()
 parser.add_argument("-m", "--model", help="Provide model name or model path for inference",
-                    default='yolov4_tiny_coco_416x416', type=str)
+                    default='model/best_openvino_2022.1_13shave.blob', type=str)
 parser.add_argument("-c", "--config", help="Provide config path for inference",
-                    default='json/yolov4-tiny.json', type=str)
+                    default='model/best.json', type=str)
 args = parser.parse_args()
 
 # parse config
@@ -60,6 +60,7 @@ syncNN = True
 
 # Create pipeline
 pipeline = dai.Pipeline()
+pipeline.setXLinkChunkSize(0)
 
 # Define sources and outputs
 camRgb = pipeline.create(dai.node.ColorCamera)
@@ -86,8 +87,10 @@ detectionNetwork.setAnchors(anchors)
 detectionNetwork.setAnchorMasks(anchorMasks)
 detectionNetwork.setIouThreshold(iouThreshold)
 detectionNetwork.setBlobPath(nnPath)
-detectionNetwork.setNumInferenceThreads(2)
+detectionNetwork.setNumInferenceThreads(1)
+detectionNetwork.setNumNCEPerInferenceThread(2)
 detectionNetwork.input.setBlocking(False)
+detectionNetwork.input.setQueueSize(1)
 
 # Linking
 camRgb.preview.link(detectionNetwork.input)
